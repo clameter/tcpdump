@@ -449,7 +449,7 @@ udp_print(netdissect_options *ndo, const u_char *bp, u_int length,
 
 		case PT_PGM:
 		case PT_PGM_ZMTP1:
-			pgm_print(ndo, cp, length, bp2);
+			pgm_print(ndo, cp, length, bp2, dport);
 			break;
 		case PT_LMP:
 			lmp_print(ndo, cp, length);

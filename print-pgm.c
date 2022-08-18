@@ -153,10 +153,12 @@ typedef enum _pgm_type {
 
 #define PGM_MIN_OPT_LEN		4
 
+#define ROCE_PORT 4791
+
 void
 pgm_print(netdissect_options *ndo,
           const u_char *bp, u_int length,
-          const u_char *bp2)
+          const u_char *bp2, unsigned udp_port)
 {
 	const struct pgm_header *pgm;
 	const struct ip *ip;
@@ -171,6 +173,14 @@ pgm_print(netdissect_options *ndo,
 	ndo->ndo_protocol = "pgm";
 	pgm = (const struct pgm_header *)bp;
 	ip = (const struct ip *)bp2;
+
+	if  (udp_port == ROCE_PORT && GET_BE_U_2(pgm->pgm_dport) == 65535) {
+		/* ROCE Encapsulated RDMA packet that may contain a PGM header */
+		ND_PRINT(" ROCE ");
+		bp += 20;	/* Skip RDMA BTH/DETH headers */
+		pgm = (const struct pgm_header *)bp;
+	}
+
 	if (IP_V(ip) == 6)
 		ip6 = (const struct ip6_hdr *)bp2;
 	else
