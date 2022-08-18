@@ -45,6 +45,7 @@ struct pgm_header {
     nd_uint16_t	pgm_length;
 };
 
+
 struct pgm_spm {
     nd_uint32_t	pgms_seq;
     nd_uint32_t	pgms_trailseq;
@@ -94,6 +95,15 @@ struct pgm_data {
     nd_uint32_t	pgmd_trailseq;
     /* ... options */
 };
+
+/* Stream context as needed for SQN validation */
+#define MAX_GSID 300
+
+static struct gsid_data {
+	nd_byte gsid[6];
+	unsigned dport;
+	unsigned seq;
+} gsid[MAX_GSID];
 
 typedef enum _pgm_type {
     PGM_SPM = 0,		/* source path message */
@@ -304,11 +314,44 @@ pgm_print(netdissect_options *ndo,
 	}
 	case PGM_ODATA: {
 	    const struct pgm_data *odata;
+	    unsigned i, seq;
+	    struct gsid_data *g;
+
+	    for(i = 0; i < MAX_GSID; i++) {
+		    g = gsid + i;
+		    if (!g->seq)
+			    break;
+		    if (g->dport == dport && memcmp(g->gsid, pgm->pgm_gsid, 6) == 0)
+			    break;
+	    }
+
+	    if (i >= MAX_GSID) {
+		ND_PRINT("[Too many GSIDs.]");
+		g = gsid;
+		memset(gsid, 0, MAX_GSID * sizeof(struct gsid_data));
+	    }
 
 	    odata = (const struct pgm_data *)(pgm + 1);
+	    seq = GET_BE_U_4(odata->pgmd_seq);
+
+	    if (g->seq) {
+		if (seq <= g->seq)
+		    ND_PRINT("[Repeated ODATA! lead %u]", g->seq);
+		else
+		    if (g->seq + 1 != seq)
+		    ND_PRINT("[Missing ODATA! lead %u]", g->seq);
+		else
+		    g->seq = seq;
+	    } else {
+		memcpy(g->gsid, pgm->pgm_gsid, 6);
+		g->seq = seq;
+	    }
+
+	    g->dport = dport;
+
 	    ND_PRINT("ODATA trail %u seq %u",
-			 GET_BE_U_4(odata->pgmd_trailseq),
-			 GET_BE_U_4(odata->pgmd_seq));
+			 GET_BE_U_4(odata->pgmd_trailseq), seq);
+
 	    bp = (const u_char *) (odata + 1);
 	    break;
 	}
