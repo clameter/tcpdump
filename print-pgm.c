@@ -804,7 +804,7 @@ pgm_print(netdissect_options *ndo,
 
 		default:
 		    ND_PRINT(" OPT_%02X [%u] ", opt_type, opt_len);
-		    bp += opt_len;
+		    bp += opt_len - 2;
 		    opts_len -= opt_len;
 		    break;
 		}
