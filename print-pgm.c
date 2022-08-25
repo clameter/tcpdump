@@ -45,6 +45,7 @@ struct pgm_header {
     nd_uint16_t	pgm_length;
 };
 
+
 struct pgm_spm {
     nd_uint32_t	pgms_seq;
     nd_uint32_t	pgms_trailseq;
@@ -95,6 +96,15 @@ struct pgm_data {
     /* ... options */
 };
 
+/* Stream context as needed for SQN validation */
+#define MAX_GSID 300
+
+static struct gsid_data {
+	nd_byte gsid[6];
+	unsigned dport;
+	unsigned seq;
+} gsid[MAX_GSID];
+
 typedef enum _pgm_type {
     PGM_SPM = 0,		/* source path message */
     PGM_POLL = 1,		/* POLL Request */
@@ -143,10 +153,12 @@ typedef enum _pgm_type {
 
 #define PGM_MIN_OPT_LEN		4
 
+#define ROCE_PORT 4791
+
 void
 pgm_print(netdissect_options *ndo,
           const u_char *bp, u_int length,
-          const u_char *bp2)
+          const u_char *bp2, unsigned udp_port)
 {
 	const struct pgm_header *pgm;
 	const struct ip *ip;
@@ -161,6 +173,14 @@ pgm_print(netdissect_options *ndo,
 	ndo->ndo_protocol = "pgm";
 	pgm = (const struct pgm_header *)bp;
 	ip = (const struct ip *)bp2;
+
+	if  (udp_port == ROCE_PORT && GET_BE_U_2(pgm->pgm_dport) == 65535) {
+		/* ROCE Encapsulated RDMA packet that may contain a PGM header */
+		ND_PRINT(" ROCE ");
+		bp += 20;	/* Skip RDMA BTH/DETH headers */
+		pgm = (const struct pgm_header *)bp;
+	}
+
 	if (IP_V(ip) == 6)
 		ip6 = (const struct ip6_hdr *)bp2;
 	else
@@ -304,11 +324,44 @@ pgm_print(netdissect_options *ndo,
 	}
 	case PGM_ODATA: {
 	    const struct pgm_data *odata;
+	    unsigned i, seq;
+	    struct gsid_data *g;
+
+	    for(i = 0; i < MAX_GSID; i++) {
+		    g = gsid + i;
+		    if (!g->seq)
+			    break;
+		    if (g->dport == dport && memcmp(g->gsid, pgm->pgm_gsid, 6) == 0)
+			    break;
+	    }
+
+	    if (i >= MAX_GSID) {
+		ND_PRINT("[Too many GSIDs.]");
+		g = gsid;
+		memset(gsid, 0, MAX_GSID * sizeof(struct gsid_data));
+	    }
 
 	    odata = (const struct pgm_data *)(pgm + 1);
+	    seq = GET_BE_U_4(odata->pgmd_seq);
+
+	    if (g->seq) {
+		if (seq <= g->seq)
+		    ND_PRINT("[Repeated ODATA! lead %u]", g->seq);
+		else
+		    if (g->seq + 1 != seq)
+		    ND_PRINT("[Missing ODATA! lead %u]", g->seq);
+		else
+		    g->seq = seq;
+	    } else {
+		memcpy(g->gsid, pgm->pgm_gsid, 6);
+		g->seq = seq;
+	    }
+
+	    g->dport = dport;
+
 	    ND_PRINT("ODATA trail %u seq %u",
-			 GET_BE_U_4(odata->pgmd_trailseq),
-			 GET_BE_U_4(odata->pgmd_seq));
+			 GET_BE_U_4(odata->pgmd_trailseq), seq);
+
 	    bp = (const u_char *) (odata + 1);
 	    break;
 	}
@@ -804,7 +857,7 @@ pgm_print(netdissect_options *ndo,
 
 		default:
 		    ND_PRINT(" OPT_%02X [%u] ", opt_type, opt_len);
-		    bp += opt_len;
+		    bp += opt_len - 2;
 		    opts_len -= opt_len;
 		    break;
 		}
