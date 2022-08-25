@@ -203,7 +203,7 @@ again:
 		break;
 
 	case IPPROTO_PGM:
-		pgm_print(ndo, bp, length, iph);
+		pgm_print(ndo, bp, length, iph, 0);
 		break;
 
 	case IPPROTO_ETHERNET:
